@@ -182,7 +182,7 @@ typedef struct MarkSweep_GC {
     struct String_GC        string_gc;
 
     /* Amount of allocated memory before trigger gc */
-    size_t                  gc_threshold;
+    size_t                  gc_nursery_size;
 
     /* During GC phase - which generation we are collecting */
     size_t                  gen_to_collect;
@@ -765,7 +765,7 @@ Parrot_gc_gms_init(PARROT_INTERP, ARGIN(Parrot_GC_Init_Args *args))
          *
          * Configured by runtime parameter (default 2%).
          */
-        self->gc_threshold = Parrot_sysmem_amount(interp) * nursery_size / 100;
+        self->gc_nursery_size = Parrot_sysmem_amount(interp) * nursery_size / 100;
 
         Parrot_gc_str_initialize(interp, &self->string_gc);
     }
@@ -1975,8 +1975,8 @@ gc_gms_maybe_mark_and_sweep(PARROT_INTERP)
 
     MarkSweep_GC * const self = (MarkSweep_GC *)interp->gc_sys->gc_private;
 
-    /* Collect every gc_threshold. */
-    if (interp->gc_sys->stats.mem_used_last_collect > self->gc_threshold) {
+    /* Collect every gc_nursery_size. */
+    if (interp->gc_sys->stats.mem_used_last_collect > self->gc_nursery_size) {
         gc_gms_mark_and_sweep(interp, 0);
     }
 }
