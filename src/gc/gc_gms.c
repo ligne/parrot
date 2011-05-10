@@ -187,6 +187,10 @@ typedef struct MarkSweep_GC {
     /* Thresholds of allocated memory for various generations */
     size_t                  threshold[MAX_GENERATIONS];
 
+    /* Allocated memory for various generations */
+    size_t                  allocated_memory[MAX_GENERATIONS];
+
+
     /* During GC phase - which generation we are collecting */
     size_t                  gen_to_collect;
 
@@ -926,8 +930,9 @@ gc_gms_select_generation_to_collect(PARROT_INTERP)
     ASSERT_ARGS(gc_gms_select_generation_to_collect)
     /* TODO Use less naive approach. E.g. count amount of allocated memory in
      * older generations */
+    /*
     size_t runs = interp->gc_sys->stats.gc_mark_runs;
-/*    if (runs % 100000000 == 0)
+    if (runs % 100000000 == 0)
         return 8;
     if (runs % 10000000 == 0)
         return 7;
@@ -935,7 +940,7 @@ gc_gms_select_generation_to_collect(PARROT_INTERP)
         return 6;
     if (runs % 100000 == 0)
         return 5;
-*/    if (runs % 10000 == 0)
+    if (runs % 10000 == 0)
         return 4;
     if (runs % 1000 == 0)
         return 3;
@@ -943,6 +948,14 @@ gc_gms_select_generation_to_collect(PARROT_INTERP)
         return 2;
     if (runs % 10 == 0)
         return 1;
+*/
+    MarkSweep_GC * const self = (MarkSweep_GC *)interp->gc_sys->gc_private;
+    size_t i;
+    for (i = MAX_GENERATIONS - 1; i > 0; --i) {
+        /* This can be really bad if we are running out of memory */
+        if (self->allocated_memory[i] > self->threshold[i])
+            return i;
+    }
     return 0;
 }
 
@@ -1130,6 +1143,15 @@ gc_gms_sweep_pools(PARROT_INTERP, ARGMOD(MarkSweep_GC *self))
                         item->ptr = Parrot_pa_insert(interp, self->objects[i + 1], item);
                         gc_gms_seal_object(interp, pmc);
                     }
+
+                    /* Update memory usage per generation */
+                    self->allocated_memory[i]   -= sizeof (PMC);
+                    self->allocated_memory[i+1] += sizeof (PMC);
+
+                    if (pmc->vtable->attr_size) {
+                        self->allocated_memory[i]   -= pmc->vtable->attr_size;
+                        self->allocated_memory[i+1] += pmc->vtable->attr_size;
+                    }
                 }
             }
             else if (!PObj_constant_TEST(pmc)) {
@@ -1141,12 +1163,17 @@ gc_gms_sweep_pools(PARROT_INTERP, ARGMOD(MarkSweep_GC *self))
                 if (PObj_custom_destroy_TEST(pmc))
                     VTABLE_destroy(interp, pmc);
 
-                if (pmc->vtable->attr_size && PMC_data(pmc))
-                    Parrot_gc_free_pmc_attributes(interp, pmc);
+                if (pmc->vtable->attr_size && PMC_data(pmc)) {
+                    gc_gms_free_pmc_attributes(interp, pmc);
+                    self->allocated_memory[i] -= pmc->vtable->attr_size;
+                }
+
                 PMC_data(pmc) = NULL;
 
                 PObj_on_free_list_SET(pmc);
                 PObj_gc_CLEAR(pmc);
+
+                self->allocated_memory[i]   -= sizeof(PMC *);
 
                 Parrot_gc_pool_free(interp, self->pmc_allocator, ptr);
             });
@@ -2293,7 +2320,7 @@ gc_gms_print_stats(PARROT_INTERP, ARGIN(const char* header))
     ASSERT_ARGS(gc_gms_print_stats)
 
 #ifdef DETAIL_MEMORY_DEBUG
-    gc_gms_print_stats_always(interp, header, gen);
+    gc_gms_print_stats_always(interp, header);
 #else
     UNUSED(interp);
     UNUSED(header);
