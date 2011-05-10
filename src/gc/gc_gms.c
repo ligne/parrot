@@ -182,7 +182,10 @@ typedef struct MarkSweep_GC {
     struct String_GC        string_gc;
 
     /* Amount of allocated memory before trigger gc */
-    size_t                  gc_nursery_size;
+    size_t                  nursery_size;
+
+    /* Thresholds of allocated memory for various generations */
+    size_t                  threshold[MAX_GENERATIONS];
 
     /* During GC phase - which generation we are collecting */
     size_t                  gen_to_collect;
@@ -261,6 +264,13 @@ static void gc_gms_block_GC_mark(PARROT_INTERP)
 
 static void gc_gms_block_GC_sweep(PARROT_INTERP)
         __attribute__nonnull__(1);
+
+static void gc_gms_calculate_threshold(PARROT_INTERP,
+    ARGIN(MarkSweep_GC *)self,
+    ARGIN(Parrot_GC_Init_Args *args))
+        __attribute__nonnull__(1)
+        __attribute__nonnull__(2)
+        __attribute__nonnull__(3);
 
 static void gc_gms_check_sanity(PARROT_INTERP)
         __attribute__nonnull__(1);
@@ -498,6 +508,10 @@ static int gen2flags(int gen);
        PARROT_ASSERT_ARG(interp))
 #define ASSERT_ARGS_gc_gms_block_GC_sweep __attribute__unused__ int _ASSERT_ARGS_CHECK = (\
        PARROT_ASSERT_ARG(interp))
+#define ASSERT_ARGS_gc_gms_calculate_threshold __attribute__unused__ int _ASSERT_ARGS_CHECK = (\
+       PARROT_ASSERT_ARG(interp) \
+    , PARROT_ASSERT_ARG(MarkSweep_GC *) \
+    , PARROT_ASSERT_ARG(args))
 #define ASSERT_ARGS_gc_gms_check_sanity __attribute__unused__ int _ASSERT_ARGS_CHECK = (\
        PARROT_ASSERT_ARG(interp))
 #define ASSERT_ARGS_gc_gms_cleanup_dirty_list __attribute__unused__ int _ASSERT_ARGS_CHECK = (\
@@ -666,9 +680,6 @@ Parrot_gc_gms_init(PARROT_INTERP, ARGIN(Parrot_GC_Init_Args *args))
 {
     ASSERT_ARGS(Parrot_gc_gms_init)
     struct MarkSweep_GC *self;
-    const Parrot_Float4 nursery_size = (args->nursery_size > 0)
-                        ? args->nursery_size
-                        : GC_DEFAULT_NURSERY_SIZE;
 
     /* We have to transfer ownership of memory to parent interp in threaded parrot */
     interp->gc_sys->finalize_gc_system = NULL; /* gc_gms_finalize; */
@@ -760,18 +771,39 @@ Parrot_gc_gms_init(PARROT_INTERP, ARGIN(Parrot_GC_Init_Args *args))
 
         self->fixed_size_allocator = Parrot_gc_fixed_allocator_new(interp);
 
-        /*
-         * Collect every nursery_size/100 of system memory.
-         *
-         * Configured by runtime parameter (default 2%).
-         */
-        self->gc_nursery_size = Parrot_sysmem_amount(interp) * nursery_size / 100;
+        gc_gms_calculate_threshold(interp, self, args);
 
         Parrot_gc_str_initialize(interp, &self->string_gc);
     }
 
     interp->gc_sys->gc_private = self;
 
+}
+
+static void
+gc_gms_calculate_threshold(PARROT_INTERP,
+        ARGIN(MarkSweep_GC *)self,
+        ARGIN(Parrot_GC_Init_Args *args))
+{
+    const Parrot_Float4 nursery_size = (args->nursery_size > 0)
+                        ? args->nursery_size
+                        : GC_DEFAULT_NURSERY_SIZE;
+
+    /* FIXME It should be configurable */
+    size_t total_mem_to_use = Parrot_sysmem_amount(interp) / 8;
+    size_t i;
+
+    /*
+     * Collect every nursery_size/100 of system memory.
+     *
+     * Configured by runtime parameter (default 2%).
+     */
+    self->nursery_size = Parrot_sysmem_amount(interp) * nursery_size / 100;
+
+    /* Let's start with linear distribution between generations */
+    for (i = 1; i < MAX_GENERATIONS; i++) {
+        self->threshold[i] = total_mem_to_use / (MAX_GENERATIONS - 1); /* -1 for nursery */
+    }
 }
 
 static void
@@ -1975,8 +2007,8 @@ gc_gms_maybe_mark_and_sweep(PARROT_INTERP)
 
     MarkSweep_GC * const self = (MarkSweep_GC *)interp->gc_sys->gc_private;
 
-    /* Collect every gc_nursery_size. */
-    if (interp->gc_sys->stats.mem_used_last_collect > self->gc_nursery_size) {
+    /* Collect every nursery_size. */
+    if (interp->gc_sys->stats.mem_used_last_collect > self->nursery_size) {
         gc_gms_mark_and_sweep(interp, 0);
     }
 }
