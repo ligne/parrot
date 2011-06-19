@@ -89,6 +89,20 @@ foreach my $file (sort grep /\.[hc]$/, @incfiles) {
     }
 }
 
+foreach my $file (sort grep /\.pir$/, @incfiles) {
+    my @includes = map {
+        m{^### include = (.+)}    && $1
+     or m{^### loadlib = '(.+?)'} && "$1.pbc"
+     or                              ()
+    } qx(gdb -q -x imcc-include-tracer.gdb -batch --args ./parrot -o/dev/null $file);
+
+    # Canonicalize each of these includes.
+    $deps{$file} = [ ];
+    foreach my $include (@includes) {
+        push @{$deps{$file}}, canonicalise_dependency($file, $include);
+    }
+}
+
 
 sub canonicalise_dependency
 {
@@ -100,6 +114,8 @@ sub canonicalise_dependency
     push @include_dirs, (File::Spec->splitpath($file))[1];  # directory
     push @include_dirs, 'include';
     push @include_dirs, 'include/pmc';
+    push @include_dirs, '.';
+    push @include_dirs, 'runtime/parrot/include';
 
     for my $path (@include_dirs) {
         next if $found;
