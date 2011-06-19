@@ -343,7 +343,7 @@ sub is_list_same {
 }
 
 sub wanted {
-    if ($File::Find::name =~ /\.(c|h)$/) {
+    if ($File::Find::name =~ /\.(c|h|pir)$/) {
         push @incfiles, $File::Find::name;
     }
 }
