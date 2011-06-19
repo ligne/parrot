@@ -211,7 +211,7 @@ if (@ARGV && $ARGV[0] eq '--dump') {
     exit 0;
 }
 
-my $test_count = grep {/\.(c)$/} (keys %deps);
+my $test_count = grep {/\.(?:c|pir)$/} (keys %deps);
 
 plan( tests => $test_count );
 
@@ -226,6 +226,7 @@ my @files = keys %deps;
 @files = @ARGV if @ARGV;
 
 check_files($rules, \@files, '.c', $vars{O});
+check_files($rules, \@files, '.pir', '.pbc');
 
 sub check_files {
 
