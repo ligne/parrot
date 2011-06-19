@@ -80,26 +80,7 @@ foreach my $file (sort grep /\.[hc]$/, @incfiles) {
 
     $deps{$file} = [ ];
     foreach my $include (@includes) {
-        my $found;
-
-        my @include_dirs;
-        push @include_dirs, (File::Spec->splitpath($file))[1];
-        push @include_dirs, 'include';
-        push @include_dirs, 'include/pmc';
-
-        for my $path (@include_dirs) {
-            next if $found;
-
-            my $make_dep = File::Spec->catfile($path, $include);
-            if (defined($make_dep) && -f $make_dep) {
-                $make_dep = collapse_path($make_dep);
-                push @{$deps{$file}}, $make_dep;
-                $found = 1;
-            }
-        }
-
-        diag "couldn't find $include, included from $file"
-           unless $found;
+        push @{$deps{$file}}, canonicalise_dependency($file, $include);
     }
     # always require an explicit .o -> .c dep. This is lazy and not always
     # needed. However, missing it when it is needed causes pain.
@@ -107,6 +88,35 @@ foreach my $file (sort grep /\.[hc]$/, @incfiles) {
         push @{$deps{$file}}, $file;
     }
 }
+
+
+sub canonicalise_dependency
+{
+    my ($file, $include) = @_;
+
+    my ($found, $make_dep);
+
+    my @include_dirs;
+    push @include_dirs, (File::Spec->splitpath($file))[1];  # directory
+    push @include_dirs, 'include';
+    push @include_dirs, 'include/pmc';
+
+    for my $path (@include_dirs) {
+        next if $found;
+
+        $make_dep = File::Spec->catfile($path, $include);
+        if (defined($make_dep) && -f $make_dep) {
+            $make_dep = collapse_path($make_dep);
+            $found = $make_dep;
+        }
+    }
+
+    diag "couldn't find $include, included from $file"
+       unless $found;
+
+    return $found || ();
+}
+
 
 sub get_rules {
 
